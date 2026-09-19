@@ -5,8 +5,8 @@
 My Feeds is a non-commercial static GitHub Pages site. It publishes the weekly
 top 10 eligible posts from `r/SideProject` using a daily GitHub Actions build.
 
-- Fetch 25 weekly top posts, exclude pinned, NSFW, deleted, and removed posts,
-  then publish the first 10 eligible results.
+- Fetch Reddit's public weekly top Atom feed and publish the first 10 valid,
+  non-deleted entries.
 - Keep the page text-first. Do not publish usernames, thumbnails, analytics,
   cookies, search, pagination, or client-side Reddit requests.
 - Keep each future source separate. Add abstractions only when a second source
@@ -18,15 +18,15 @@ top 10 eligible posts from `r/SideProject` using a daily GitHub Actions build.
   existing tiny stale-data script.
 - Treat `generate.py` as the source of the site. `_site/` is generated output
   and remains untracked.
-- Keep Reddit OAuth credentials in environment variables or GitHub secrets.
-  Never write credentials into source, generated HTML, logs, or browser code.
+- Keep the Reddit fetch credential-free. Use the public Atom feed and a
+  descriptive fixed user agent.
 - Fail before deployment when fetching or validation fails. This preserves the
   last successful GitHub Pages deployment.
 - Preserve accessible semantic HTML, keyboard focus styles, responsive layouts,
   system light/dark themes, and reduced-motion handling.
 
-Read [README.md](README.md) when changing setup, deployment, credentials, or
-the refresh schedule.
+Read [README.md](README.md) when changing setup, deployment, the feed source,
+or the refresh schedule.
 
 ## Change workflow
 

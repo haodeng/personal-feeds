@@ -1,74 +1,59 @@
 #!/usr/bin/env python3
-"""Build the static My Feeds page from Reddit's OAuth API."""
+"""Build the static My Feeds page from Reddit's public Atom feed."""
 
 from __future__ import annotations
 
 import argparse
-import base64
 import html
-import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 SUBREDDIT = "SideProject"
 OUTPUT_DIR = Path("_site")
 REDDIT_ORIGIN = "https://www.reddit.com"
+FEED_URL = f"{REDDIT_ORIGIN}/r/{SUBREDDIT}/top/.rss?t=week&limit=25"
+USER_AGENT = "github-actions:personal-feeds:v1.0 (+https://github.com/haodeng/personal-feeds)"
+ATOM = "{http://www.w3.org/2005/Atom}"
 
 
-def request_json(request: Request) -> dict:
+def fetch_posts() -> list[dict]:
+    request = Request(FEED_URL, headers={"User-Agent": USER_AGENT})
     try:
         with urlopen(request, timeout=30) as response:
-            return json.load(response)
+            root = ElementTree.parse(response).getroot()
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:500]
         raise RuntimeError(f"Reddit returned HTTP {error.code}: {detail}") from error
-    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+    except (URLError, TimeoutError, ElementTree.ParseError) as error:
         raise RuntimeError(f"Reddit request failed: {error}") from error
 
-
-def fetch_posts(client_id: str, client_secret: str, user_agent: str) -> list[dict]:
-    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    token_request = Request(
-        f"{REDDIT_ORIGIN}/api/v1/access_token",
-        data=urlencode({"grant_type": "client_credentials"}).encode(),
-        headers={
-            "Authorization": f"Basic {credentials}",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": user_agent,
-        },
-        method="POST",
-    )
-    token = request_json(token_request).get("access_token")
-    if not token:
-        raise RuntimeError("Reddit did not return an OAuth access token")
-
-    listing_request = Request(
-        f"https://oauth.reddit.com/r/{SUBREDDIT}/top?t=week&limit=25&raw_json=1",
-        headers={"Authorization": f"Bearer {token}", "User-Agent": user_agent},
-    )
-    payload = request_json(listing_request)
-    try:
-        return [child["data"] for child in payload["data"]["children"]]
-    except (KeyError, TypeError) as error:
-        raise RuntimeError("Reddit returned an unexpected listing response") from error
+    posts = []
+    for entry in root.findall(f"{ATOM}entry"):
+        link = entry.find(f"{ATOM}link")
+        posts.append(
+            {
+                "title": entry.findtext(f"{ATOM}title", ""),
+                "url": link.get("href", "") if link is not None else "",
+                "published": entry.findtext(f"{ATOM}published", ""),
+            }
+        )
+    return posts
 
 
 def select_posts(posts: list[dict]) -> list[dict]:
     selected = []
     for post in posts:
         title = str(post.get("title", "")).strip()
-        if (
-            not title
-            or title.lower() in {"[deleted]", "[removed]"}
-            or post.get("stickied")
-            or post.get("over_18")
-            or post.get("removed_by_category")
-        ):
+        parsed = urlparse(str(post.get("url", "")))
+        host = (parsed.hostname or "").lower()
+        if not title or title.lower() in {"[deleted]", "[removed]"}:
+            continue
+        if parsed.scheme != "https" or not (host == "reddit.com" or host.endswith(".reddit.com")):
             continue
         selected.append(post)
         if len(selected) == 10:
@@ -78,55 +63,25 @@ def select_posts(posts: list[dict]) -> list[dict]:
     return selected
 
 
-def safe_external_url(post: dict) -> str | None:
-    if post.get("is_self"):
-        return None
-    url = str(post.get("url_overridden_by_dest") or post.get("url") or "")
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme not in {"http", "https"} or not host:
-        return None
-    if host == "redd.it" or host.endswith(".redd.it") or host == "reddit.com" or host.endswith(".reddit.com"):
-        return None
-    return url
-
-
-def format_date(timestamp: int | float) -> str:
-    date = datetime.fromtimestamp(timestamp, timezone.utc)
+def format_date(timestamp: str) -> str:
+    date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     return f"{date.strftime('%b')} {date.day}, {date.year}"
 
 
 def render_card(post: dict, rank: int) -> str:
     title = html.escape(str(post["title"]))
-    permalink = html.escape(f"{REDDIT_ORIGIN}{post.get('permalink', '')}", quote=True)
-    flair = str(post.get("link_flair_text") or "").strip()
-    flair_html = f'<span class="flair">{html.escape(flair)}</span>' if flair else ""
-    external_url = safe_external_url(post)
-    project_link = (
-        f'<a class="project-link" href="{html.escape(external_url, quote=True)}" rel="external nofollow noreferrer">Visit project</a>'
-        if external_url
-        else ""
-    )
+    permalink = html.escape(str(post["url"]), quote=True)
     lead_class = " feed-card--lead" if rank == 1 else ""
-    score = max(0, int(post.get("score") or 0))
-    comments = max(0, int(post.get("num_comments") or 0))
-    created = format_date(float(post.get("created_utc") or 0))
+    created = format_date(str(post["published"]))
 
     return f"""
       <li class="feed-card{lead_class}">
         <span class="rank" aria-label="Rank {rank}">{rank:02d}</span>
         <article>
-          <div class="post-meta">{flair_html}<time>{created}</time></div>
+          <div class="post-meta"><time>{created}</time></div>
           <h2><a href="{permalink}" rel="external nofollow noreferrer">{title}</a></h2>
           <div class="post-footer">
-            <div class="metrics" aria-label="Reddit activity">
-              <span>{score:,} points</span>
-              <span>{comments:,} comments</span>
-            </div>
-            <div class="post-links">
-              <a href="{permalink}" rel="external nofollow noreferrer">Discussion</a>
-              {project_link}
-            </div>
+            <a href="{permalink}" rel="external nofollow noreferrer">Open discussion</a>
           </div>
         </article>
       </li>"""
@@ -190,15 +145,12 @@ def render_page(posts: list[dict], updated_at: datetime) -> str:
     .feed-card--lead {{ grid-column: 1 / -1; min-height: 370px; padding: clamp(28px, 5vw, 54px); background: var(--surface-strong); }}
     .rank {{ display: block; margin-bottom: 50px; color: var(--accent); font-variant-numeric: tabular-nums; font-size: 0.86rem; font-weight: 760; }}
     .post-meta {{ min-height: 24px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 0.76rem; }}
-    .flair {{ color: var(--text); font-weight: 700; }}
     h2 {{ margin: 12px 0 30px; max-width: 26ch; font-size: clamp(1.35rem, 2.4vw, 2rem); line-height: 1.08; letter-spacing: -0.035em; }}
     .feed-card--lead h2 {{ max-width: 20ch; font-size: clamp(2rem, 5vw, 4.6rem); }}
     h2 a {{ text-decoration-thickness: 1px; text-decoration-color: transparent; text-underline-offset: 0.14em; transition: color 160ms ease, text-decoration-color 160ms ease; }}
     h2 a:hover {{ color: var(--accent); text-decoration-color: currentColor; }}
-    .post-footer {{ display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; justify-content: space-between; margin-top: auto; }}
-    .metrics, .post-links {{ display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 0.78rem; }}
-    .metrics {{ color: var(--muted); }}
-    .post-links a {{ color: var(--accent); font-weight: 720; text-underline-offset: 4px; }}
+    .post-footer {{ margin-top: auto; font-size: 0.78rem; }}
+    .post-footer a {{ color: var(--accent); font-weight: 720; text-underline-offset: 4px; }}
     .feed-card article {{ min-height: calc(100% - 66px); display: flex; flex-direction: column; }}
     .site-footer {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px 0 42px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.78rem; }}
     .site-footer p {{ margin: 0; }}
@@ -211,7 +163,6 @@ def render_page(posts: list[dict], updated_at: datetime) -> str:
       .feed-card--lead {{ grid-column: auto; min-height: 330px; }}
       .feed-card {{ min-height: 270px; padding: 24px; }}
       .rank {{ margin-bottom: 38px; }}
-      .post-footer {{ align-items: flex-start; flex-direction: column; }}
     }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{ scroll-behavior: auto !important; transition-duration: 0.01ms !important; }}
@@ -256,23 +207,18 @@ def render_page(posts: list[dict], updated_at: datetime) -> str:
 def self_test() -> None:
     valid = {
         "title": "A useful <project>",
-        "permalink": "/r/SideProject/comments/abc/useful/",
-        "url": "https://example.com",
-        "score": 42,
-        "num_comments": 7,
-        "created_utc": 1_700_000_000,
+        "url": "https://www.reddit.com/r/SideProject/comments/abc/useful/",
+        "published": "2026-09-19T08:00:00+00:00",
     }
     posts = [
-        {**valid, "title": "Pinned", "stickied": True},
-        {**valid, "title": "Unsafe", "over_18": True},
+        {**valid, "title": "[deleted]"},
+        {**valid, "url": "https://example.com/not-reddit"},
         valid,
     ]
     assert select_posts(posts) == [valid]
-    assert safe_external_url(valid) == "https://example.com"
-    assert safe_external_url({**valid, "url": "https://www.reddit.com/x"}) is None
     page = render_page([valid], datetime(2026, 9, 19, tzinfo=timezone.utc))
     assert "A useful &lt;project&gt;" in page and "<project>" not in page
-    assert "Visit project" in page and 'id="stale-warning"' in page
+    assert "Open discussion" in page and 'id="stale-warning"' in page
 
 
 def main() -> int:
@@ -284,20 +230,8 @@ def main() -> int:
         print("self-test passed")
         return 0
 
-    required = ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT")
-    missing = [name for name in required if not os.environ.get(name)]
-    if missing:
-        print(f"Missing required environment variables: {', '.join(missing)}", file=sys.stderr)
-        return 2
-
     try:
-        posts = select_posts(
-            fetch_posts(
-                os.environ["REDDIT_CLIENT_ID"],
-                os.environ["REDDIT_CLIENT_SECRET"],
-                os.environ["REDDIT_USER_AGENT"],
-            )
-        )
+        posts = select_posts(fetch_posts())
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         (OUTPUT_DIR / "index.html").write_text(
             render_page(posts, datetime.now(timezone.utc)), encoding="utf-8"
