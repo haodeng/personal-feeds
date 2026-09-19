@@ -1,15 +1,17 @@
 # My Feeds
 
 A static daily snapshot of the weekly top 10 posts from
-[`r/SideProject`](https://www.reddit.com/r/SideProject/).
+[`r/SideProject`](https://www.reddit.com/r/SideProject/) and the daily top 10
+repositories from [GitHub Trending](https://github.com/trending?since=daily).
 
 ## Setup
 
 1. In **Settings > Pages**, select **GitHub Actions** as the deployment source.
 2. Run **Update feed** manually once from the Actions tab.
 
-No Reddit account, API application, or repository secrets are required. The
-generator reads Reddit's public weekly top Atom feed.
+No accounts, API applications, or repository secrets are required. The
+generator reads Reddit's public weekly top Atom feed and GitHub's public daily
+Trending page.
 
 The workflow refreshes the site daily at 08:17 UTC. GitHub schedules are
 best-effort and public repositories can have schedules disabled after 60 days
