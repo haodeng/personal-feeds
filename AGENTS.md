@@ -4,12 +4,14 @@
 
 My Feeds is a non-commercial static GitHub Pages site. It publishes the weekly
 top 10 eligible posts from `r/SideProject` and the daily top 10 repositories
-from GitHub Trending using a daily GitHub Actions build.
+from GitHub Trending and GitHub Trending 中文 using a daily GitHub Actions build.
 
 - Fetch Reddit's public weekly top Atom feed and publish the first 10 valid,
   non-deleted entries.
 - Fetch GitHub's public daily Trending page and publish its first 10 valid
   repositories with their stars-today count.
+- Fetch GitHub's public daily Chinese-language Trending page and publish its
+  first 10 valid repositories with their stars-today count.
 - Keep the page text-first. Do not publish usernames, thumbnails, analytics,
   cookies, search, pagination, or client-side Reddit requests.
 - Keep each future source separate. Add abstractions only when a second source

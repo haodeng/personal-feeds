@@ -2,7 +2,8 @@
 
 A static daily snapshot of the weekly top 10 posts from
 [`r/SideProject`](https://www.reddit.com/r/SideProject/) and the daily top 10
-repositories from [GitHub Trending](https://github.com/trending?since=daily).
+repositories from [GitHub Trending](https://github.com/trending?since=daily)
+and [GitHub Trending 中文](https://github.com/trending?since=daily&spoken_language_code=zh).
 
 ## Setup
 
@@ -11,7 +12,7 @@ repositories from [GitHub Trending](https://github.com/trending?since=daily).
 
 No accounts, API applications, or repository secrets are required. The
 generator reads Reddit's public weekly top Atom feed and GitHub's public daily
-Trending page.
+Trending pages.
 
 The workflow refreshes the site daily at 08:17 UTC. GitHub schedules are
 best-effort and public repositories can have schedules disabled after 60 days
