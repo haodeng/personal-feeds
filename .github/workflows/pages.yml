@@ -24,10 +24,15 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .feed-cache
+          key: feeds-v1-${{ github.run_id }}
+          restore-keys: feeds-v1-
       - uses: actions/configure-pages@v5
       - name: Check generator
         run: python3 generate.py --self-test
-      - name: Fetch Reddit and build
+      - name: Fetch sources and build
         run: python3 generate.py
       - uses: actions/upload-pages-artifact@v4
         with:

@@ -4,7 +4,8 @@
 
 My Feeds is a non-commercial static GitHub Pages site. It publishes the weekly
 top 10 eligible posts from `r/SideProject` and the daily top 10 repositories
-from GitHub Trending and GitHub Trending 中文 using a daily GitHub Actions build.
+from GitHub Trending and GitHub Trending 中文, plus 10 Show HN stories and 10
+V2EX Hot Topics, using a daily GitHub Actions build.
 
 - Fetch Reddit's public weekly top Atom feed and publish the first 10 valid,
   non-deleted entries.
@@ -12,6 +13,8 @@ from GitHub Trending and GitHub Trending 中文 using a daily GitHub Actions bui
   repositories with their stars-today count.
 - Fetch GitHub's public daily Chinese-language Trending page and publish its
   first 10 valid repositories with their stars-today count.
+- Fetch Hacker News's public Show HN API and publish its first 10 valid stories.
+- Fetch V2EX's public Hot Topics API and publish its first 10 valid topics.
 - Keep the page text-first. Do not publish usernames, thumbnails, analytics,
   cookies, search, pagination, or client-side Reddit requests.
 - Keep each future source separate. Add abstractions only when a second source
@@ -25,8 +28,9 @@ from GitHub Trending and GitHub Trending 中文 using a daily GitHub Actions bui
   and remains untracked.
 - Keep both fetches credential-free. Use the public Atom feed, public Trending
   page, and a descriptive fixed user agent.
-- Fail before deployment when fetching or validation fails. This preserves the
-  last successful GitHub Pages deployment.
+- On a first run, fail before deployment when fetching or validation fails.
+  After a successful fetch, use a validated per-source snapshot only for a
+  failed source and visibly label it last-known-good.
 - Preserve accessible semantic HTML, keyboard focus styles, responsive layouts,
   system light/dark themes, and reduced-motion handling.
 
