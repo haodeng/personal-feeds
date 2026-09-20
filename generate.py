@@ -214,24 +214,36 @@ def render_page(posts: list[dict], repos: list[dict], chinese_repos: list[dict],
   <style>
     :root {{
       color-scheme: light dark;
-      --bg: #f3f2ee;
-      --surface: #fbfaf7;
-      --surface-strong: #e8e5dd;
-      --text: #20201e;
-      --muted: #66645f;
-      --line: #d5d2c9;
+      --bg: #f7f6f2;
+      --surface: #efede7;
+      --surface-strong: #e6e3db;
+      --text: #24231f;
+      --muted: #615f58;
+      --line: #d8d5cc;
       --accent: #a43b17;
       --accent-soft: #f3d7c9;
       --radius: 18px;
     }}
+    :root[data-theme="dark"] {{
+      color-scheme: dark;
+      --bg: #151613;
+      --surface: #20211d;
+      --surface-strong: #2a2b25;
+      --text: #f5f3ec;
+      --muted: #b7b4aa;
+      --line: #3e3f38;
+      --accent: #ff8a5c;
+      --accent-soft: #512718;
+    }}
     @media (prefers-color-scheme: dark) {{
-      :root {{
-        --bg: #171715;
-        --surface: #20201d;
-        --surface-strong: #2b2a26;
-        --text: #f1efe8;
-        --muted: #aaa79e;
-        --line: #3a3934;
+      :root:not([data-theme]) {{
+        color-scheme: dark;
+        --bg: #151613;
+        --surface: #20211d;
+        --surface-strong: #2a2b25;
+        --text: #f5f3ec;
+        --muted: #b7b4aa;
+        --line: #3e3f38;
         --accent: #ff8a5c;
         --accent-soft: #512718;
       }}
@@ -240,42 +252,52 @@ def render_page(posts: list[dict], repos: list[dict], chinese_repos: list[dict],
     html {{ font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     body {{ margin: 0; background: var(--bg); color: var(--text); }}
     a {{ color: inherit; }}
-    a:focus-visible {{ outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 3px; }}
-    .shell {{ width: min(1180px, calc(100% - 40px)); margin: 0 auto; }}
+    a:focus-visible, button:focus-visible {{ outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 3px; }}
+    .shell {{ width: min(1240px, calc(100% - 40px)); margin: 0 auto; }}
     .site-header {{ display: flex; align-items: center; justify-content: space-between; min-height: 60px; border-bottom: 1px solid var(--line); }}
     .brand {{ font-size: 1rem; font-weight: 760; letter-spacing: -0.02em; text-decoration: none; }}
-    .source-links {{ display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 16px; }}
+    .header-actions {{ display: flex; flex: 1; min-width: 0; align-items: center; justify-content: flex-end; gap: 14px; }}
+    .source-links {{ display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 8px 16px; }}
     .source-link {{ color: var(--muted); font-size: 0.88rem; text-underline-offset: 4px; white-space: nowrap; }}
-    .hero {{ padding: clamp(38px, 5vw, 64px) 0 30px; max-width: 760px; }}
+    .theme-toggle {{ padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text); font: inherit; font-size: 0.78rem; font-weight: 720; cursor: pointer; }}
+    .theme-toggle:hover {{ background: var(--surface); }}
+    .hero {{ padding: clamp(32px, 4vw, 52px) 0 24px; max-width: 760px; }}
     .eyebrow {{ margin: 0 0 18px; color: var(--accent); font-size: 0.76rem; font-weight: 760; letter-spacing: 0.13em; text-transform: uppercase; }}
-    h1 {{ margin: 0; max-width: 700px; font-size: clamp(2.7rem, 5vw, 4.8rem); line-height: 0.95; letter-spacing: -0.055em; font-weight: 760; }}
-    .hero-copy {{ margin: 16px 0 0; max-width: 560px; color: var(--muted); font-size: 1.05rem; line-height: 1.5; }}
-    .update-line {{ display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 18px; color: var(--muted); font-size: 0.82rem; }}
+    h1 {{ margin: 0; max-width: 700px; font-size: clamp(2.45rem, 4.2vw, 4rem); line-height: 0.98; letter-spacing: -0.05em; font-weight: 760; }}
+    .hero-copy {{ margin: 12px 0 0; max-width: 560px; color: var(--muted); font-size: 1rem; line-height: 1.55; }}
+    .update-line {{ display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 14px; color: var(--muted); font-size: 0.82rem; }}
     .stale-warning {{ margin: 0 0 28px; padding: 14px 18px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); color: var(--text); }}
     .stale-warning[hidden] {{ display: none; }}
-    .feeds-layout {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px; margin-bottom: 56px; }}
+    .feeds-layout {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; margin-bottom: 56px; }}
     .section-heading {{ display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; margin: 0 0 12px; }}
     .section-heading h2 {{ margin: 0; max-width: none; font-size: clamp(1.5rem, 3vw, 2.4rem); }}
     .section-heading p {{ margin: 0; color: var(--muted); font-size: 0.88rem; }}
     .feed-grid {{ margin: 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }}
-    .feed-row {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }}
-    .rank {{ color: var(--accent); font-variant-numeric: tabular-nums; font-size: 0.82rem; font-weight: 760; }}
-    .post-meta {{ display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 0.76rem; }}
-    .feed-row h2, .feed-row h3 {{ margin: 7px 0 8px; max-width: 42ch; font-size: clamp(1.15rem, 1.7vw, 1.5rem); line-height: 1.15; letter-spacing: -0.03em; }}
+    .feed-row {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; margin: 0 -10px; padding: 16px 10px; border-bottom: 1px solid var(--line); border-radius: 8px; }}
+    .feed-row:hover {{ background: var(--surface); }}
+    .feed-row:active {{ background: var(--surface-strong); }}
+    .rank {{ color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 0.78rem; font-weight: 760; }}
+    .post-meta {{ display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 0.8rem; }}
+    .feed-row h2, .feed-row h3 {{ margin: 7px 0 8px; max-width: 42ch; font-size: clamp(1.18rem, 1.7vw, 1.52rem); line-height: 1.18; letter-spacing: -0.028em; }}
     .feed-row h2 a, .feed-row h3 a {{ text-decoration-thickness: 1px; text-decoration-color: transparent; text-underline-offset: 0.14em; transition: color 160ms ease, text-decoration-color 160ms ease; }}
     .feed-row h2 a:hover, .feed-row h3 a:hover {{ color: var(--accent); text-decoration-color: currentColor; }}
-    .post-footer {{ font-size: 0.78rem; }}
-    .repo-description {{ margin: 0 0 10px; max-width: 70ch; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }}
+    .post-footer {{ font-size: 0.8rem; }}
+    .repo-description {{ margin: 0 0 10px; max-width: 70ch; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }}
     .post-footer a {{ color: var(--accent); font-weight: 720; text-underline-offset: 4px; }}
+    .feed-section:last-child {{ grid-column: 1 / -1; }}
+    .feed-section:last-child .feed-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 56px; }}
     .site-footer {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px 0 42px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.78rem; }}
     .site-footer p {{ margin: 0; }}
     @media (max-width: 720px) {{
       .shell {{ width: min(100% - 28px, 1180px); }}
       .site-header {{ min-height: 56px; padding: 10px 0; }}
-      .hero {{ padding: 38px 0 26px; }}
-      h1 {{ font-size: clamp(2.65rem, 14vw, 4rem); }}
+      .header-actions {{ align-items: flex-start; }}
+      .hero {{ padding: 32px 0 22px; }}
+      h1 {{ font-size: clamp(2.45rem, 13vw, 3.5rem); }}
       .feed-row {{ grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 14px 0; }}
       .feeds-layout {{ grid-template-columns: 1fr; gap: 44px; margin-bottom: 44px; }}
+      .feed-section:last-child {{ grid-column: auto; }}
+      .feed-section:last-child .feed-grid {{ display: block; }}
     }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{ scroll-behavior: auto !important; transition-duration: 0.01ms !important; }}
@@ -285,14 +307,17 @@ def render_page(posts: list[dict], repos: list[dict], chinese_repos: list[dict],
 <body>
   <header class="shell site-header">
     <a class="brand" href="./">My Feeds</a>
-    <nav class="source-links" aria-label="Sources">
-      <a class="source-link" href="https://www.reddit.com/r/{SUBREDDIT}/" rel="external nofollow noreferrer">r/{SUBREDDIT}</a>
-      <a class="source-link" href="{GITHUB_TRENDING_URL}" rel="external nofollow noreferrer">GitHub Trending</a>
-      <a class="source-link" href="https://github.com/trending?since=daily&amp;spoken_language_code=zh" rel="external nofollow noreferrer">GitHub Trending 中文</a>
-      <a class="source-link" href="https://www.indiehackers.com/" rel="external nofollow noreferrer">Indie Hackers</a>
-      <a class="source-link" href="https://www.producthunt.com/" rel="external nofollow noreferrer">Product Hunt</a>
-      <a class="source-link" href="https://www.v2ex.com/" rel="external nofollow noreferrer">V2EX</a>
-    </nav>
+    <div class="header-actions">
+      <nav class="source-links" aria-label="Sources">
+        <a class="source-link" href="https://www.reddit.com/r/{SUBREDDIT}/" rel="external nofollow noreferrer">r/{SUBREDDIT}</a>
+        <a class="source-link" href="{GITHUB_TRENDING_URL}" rel="external nofollow noreferrer">GitHub Trending</a>
+        <a class="source-link" href="https://github.com/trending?since=daily&amp;spoken_language_code=zh" rel="external nofollow noreferrer">GitHub Trending 中文</a>
+        <a class="source-link" href="https://www.indiehackers.com/" rel="external nofollow noreferrer">Indie Hackers</a>
+        <a class="source-link" href="https://www.producthunt.com/" rel="external nofollow noreferrer">Product Hunt</a>
+        <a class="source-link" href="https://www.v2ex.com/" rel="external nofollow noreferrer">V2EX</a>
+      </nav>
+      <button class="theme-toggle" type="button" aria-pressed="false">Theme</button>
+    </div>
   </header>
   <main class="shell">
     <section class="hero" aria-labelledby="page-title">
@@ -340,6 +365,19 @@ def render_page(posts: list[dict], repos: list[dict], chinese_repos: list[dict],
     <p><a href="{GITHUB_TRENDING_URL}" rel="external nofollow noreferrer">Visit GitHub Trending</a></p>
   </footer>
   <script>
+    const themeToggle = document.querySelector(".theme-toggle");
+    const savedTheme = localStorage.getItem("theme");
+    const setTheme = (theme) => {{
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("theme", theme);
+      themeToggle.textContent = theme === "dark" ? "Dark" : "Light";
+      themeToggle.setAttribute("aria-pressed", theme === "dark");
+      themeToggle.setAttribute("aria-label", `Switch to ${{theme === "dark" ? "light" : "dark"}} theme`);
+    }};
+    setTheme(savedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+    themeToggle.addEventListener("click", () => setTheme(
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark"
+    ));
     const updatedAt = Date.parse(document.querySelector("#updated-at").dateTime);
     if (Date.now() - updatedAt > 48 * 60 * 60 * 1000) {{
       document.querySelector("#stale-warning").hidden = false;
