@@ -10,6 +10,7 @@ import re
 import sys
 import tempfile
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -30,6 +31,8 @@ HACKER_NEWS_SHOW_URL = f"{HACKER_NEWS_ORIGIN}/showstories.json"
 HACKER_NEWS_ITEM_URL = f"{HACKER_NEWS_ORIGIN}/item/{{}}.json"
 HACKER_NEWS_DISCUSSION_URL = "https://news.ycombinator.com/item?id={}"
 V2EX_HOT_URL = "https://www.v2ex.com/api/topics/hot.json"
+DANISH_NEWS_URL = "https://www.dr.dk/nyheder/service/feeds/allenyheder"
+TV2_NEWS_URL = "https://nyheder.tv2.dk/"
 USER_AGENT = "github-actions:personal-feeds:v1.0 (+https://github.com/haodeng/personal-feeds)"
 ATOM = "{http://www.w3.org/2005/Atom}"
 
@@ -233,6 +236,103 @@ def fetch_v2ex_topics() -> list[dict]:
     return select_v2ex_topics(fetch_json(V2EX_HOT_URL, "V2EX"))
 
 
+def fetch_danish_news() -> list[dict]:
+    request = Request(DANISH_NEWS_URL, headers={"User-Agent": USER_AGENT})
+    try:
+        with urlopen(request, timeout=30) as response:
+            root = ElementTree.parse(response).getroot()
+    except HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"DR Nyheder returned HTTP {error.code}: {detail}") from error
+    except (URLError, TimeoutError, ElementTree.ParseError) as error:
+        raise RuntimeError(f"DR Nyheder request failed: {error}") from error
+
+    news = []
+    for item in root.findall(".//item"):
+        title = item.findtext("title", "").strip()
+        url = item.findtext("link", "").strip()
+        published = item.findtext("pubDate", "").strip()
+        parsed_url = urlparse(url)
+        host = (parsed_url.hostname or "").lower()
+        try:
+            published_at = parsedate_to_datetime(published)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not title or parsed_url.scheme != "https" or not (host == "dr.dk" or host.endswith(".dr.dk")):
+            continue
+        news.append({"title": title, "url": url, "published": published_at.astimezone(timezone.utc).isoformat()})
+        if len(news) == 10:
+            break
+    if not news:
+        raise RuntimeError("DR Nyheder returned no publishable stories")
+    return news
+
+
+def fetch_tv2_html(url: str) -> str:
+    request = Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urlopen(request, timeout=30) as response:
+            return response.read().decode(response.headers.get_content_charset() or "utf-8")
+    except HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"TV 2 returned HTTP {error.code}: {detail}") from error
+    except (URLError, TimeoutError, UnicodeDecodeError) as error:
+        raise RuntimeError(f"TV 2 request failed: {error}") from error
+
+
+def select_tv2_story_links(page: str) -> list[dict]:
+    stories = []
+    for match in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', page, re.DOTALL):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        item_list = data if data.get("@type") == "ItemList" else data.get("mainEntity")
+        if not isinstance(item_list, dict) or item_list.get("@type") != "ItemList":
+            continue
+        items = item_list.get("itemListElement")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("name", "")).strip()
+            url = str(item.get("url", "")).strip()
+            parsed = urlparse(url)
+            if not title or parsed.scheme != "https" or parsed.hostname != "nyheder.tv2.dk":
+                continue
+            stories.append({"title": title, "url": url})
+            if len(stories) == 30:
+                return stories
+    return stories
+
+
+def extract_tv2_published(page: str) -> str:
+    match = re.search(r'<meta (?:name|property)="article:published_time" content="([^"]+)">', page)
+    if not match:
+        return ""
+    try:
+        return datetime.fromisoformat(match.group(1).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        return ""
+
+
+def fetch_tv2_news() -> list[dict]:
+    stories = select_tv2_story_links(fetch_tv2_html(TV2_NEWS_URL))
+    news = []
+    for story in stories:
+        published = extract_tv2_published(fetch_tv2_html(story["url"]))
+        if published:
+            news.append({**story, "published": published, "source": "TV 2"})
+            if len(news) == 10:
+                break
+    if not news:
+        raise RuntimeError("TV 2 returned no publishable stories")
+    return news
+
+
 def select_posts(posts: list[dict]) -> list[dict]:
     selected = []
     for post in posts:
@@ -254,6 +354,11 @@ def select_posts(posts: list[dict]) -> list[dict]:
 def format_date(timestamp: str) -> str:
     date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     return f"{date.strftime('%b')} {date.day}, {date.year}"
+
+
+def format_timestamp(timestamp: str) -> str:
+    date = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return f"{date.strftime('%b')} {date.day}, {date.year} at {date:%H:%M} UTC"
 
 
 def render_source_status(source: dict) -> str:
@@ -313,6 +418,23 @@ def render_news_card(item: dict, rank: int) -> str:
           {meta_html}
           <h3><a href="{url}" rel="external nofollow noreferrer">{title}</a></h3>
           <div class="post-footer"><a href="{url}" rel="external nofollow noreferrer">Open discussion</a></div>
+        </article>
+      </li>"""
+
+
+def render_danish_news_card(item: dict, rank: int) -> str:
+    title = html.escape(str(item["title"]))
+    url = html.escape(str(item["url"]), quote=True)
+    published = html.escape(str(item["published"]), quote=True)
+    source = html.escape(str(item.get("source", "DR Nyheder")))
+    outlet = "TV 2" if source == "TV 2" else "DR"
+    return f"""
+      <li class="feed-row">
+        <span class="rank" aria-label="Rank {rank}">{rank:02d}</span>
+        <article>
+          <div class="post-meta">{source} · <time datetime="{published}">{format_timestamp(str(item["published"]))}</time></div>
+          <h3><a href="{url}" rel="external nofollow noreferrer">{title}</a></h3>
+          <div class="post-footer"><a href="{url}" rel="external nofollow noreferrer">Read on {outlet}</a></div>
         </article>
       </li>"""
 
@@ -460,6 +582,7 @@ def render_page(
         <a class="source-link" href="https://www.indiehackers.com/" rel="external nofollow noreferrer">Indie Hackers</a>
         <a class="source-link" href="https://www.producthunt.com/" rel="external nofollow noreferrer">Product Hunt</a>
         <a class="source-link" href="https://www.v2ex.com/" rel="external nofollow noreferrer">V2EX</a>
+        <a class="source-link" href="./danish-news/index.html">Danish News</a>
       </nav>
       <button class="theme-toggle" type="button" aria-pressed="false">Theme</button>
     </div>
@@ -468,10 +591,10 @@ def render_page(
     <section class="hero" aria-labelledby="page-title">
       <p class="eyebrow">Daily top 10</p>
       <h1 id="page-title">What builders are watching.</h1>
-      <p class="hero-copy">A daily snapshot from five developer communities.</p>
+      <p class="hero-copy">A daily snapshot from developer communities and Danish news.</p>
       <div class="update-line">
         <span>Updated <time id="updated-at" datetime="{updated_iso}">{updated_label}</time></span>
-        <span>Five public sources, one quick read</span>
+        <span>Six public sources, one quick read</span>
       </div>
     </section>
     <p class="stale-warning" id="stale-warning" role="status" hidden>This feed is more than 48 hours old. The last successful snapshot remains available.</p>
@@ -536,7 +659,7 @@ def render_page(
     </div>
   </main>
   <footer class="shell site-footer">
-    <p>Data from Reddit, GitHub, Hacker News, and V2EX. Not affiliated with them.</p>
+    <p>Data from Reddit, GitHub, Hacker News, V2EX, and DR. Not affiliated with them.</p>
     <p><a href="{GITHUB_TRENDING_URL}" rel="external nofollow noreferrer">Visit GitHub Trending</a></p>
   </footer>
   <script>
@@ -563,6 +686,80 @@ def render_page(
 """
 
 
+def render_danish_news_page(danish_news: list[dict], tv2_news: list[dict], source: dict, tv2_source: dict) -> str:
+    dr_cards = "\n".join(render_danish_news_card(item, rank) for rank, item in enumerate(danish_news, 1))
+    tv2_cards = "\n".join(render_danish_news_card(item, rank) for rank, item in enumerate(tv2_news, 1))
+    dr_status = render_source_status(source)
+    tv2_status = render_source_status(tv2_source)
+    return f"""<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Latest Danish news from DR Nyheder.">
+  <meta name="color-scheme" content="light dark">
+  <title>Danish News · My Feeds</title>
+  <style>
+    :root {{ color-scheme: light dark; --bg: #f7f6f2; --surface: #efede7; --text: #24231f; --muted: #615f58; --line: #d8d5cc; --accent: #a43b17; }}
+    :root[data-theme="dark"] {{ color-scheme: dark; --bg: #151613; --surface: #20211d; --text: #f5f3ec; --muted: #b7b4aa; --line: #3e3f38; --accent: #ff8a5c; }}
+    @media (prefers-color-scheme: dark) {{ :root:not([data-theme]) {{ --bg: #151613; --surface: #20211d; --text: #f5f3ec; --muted: #b7b4aa; --line: #3e3f38; --accent: #ff8a5c; }} }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    a {{ color: inherit; }}
+    a:focus-visible {{ outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 3px; }}
+    .shell {{ width: min(1240px, calc(100% - 40px)); margin: 0 auto; }}
+    header {{ display: flex; align-items: center; min-height: 60px; border-bottom: 1px solid var(--line); }}
+    .brand {{ font-weight: 760; letter-spacing: -0.02em; text-decoration: none; }}
+    main {{ padding: clamp(32px, 4vw, 52px) 0 56px; }}
+    .eyebrow {{ margin: 0 0 18px; color: var(--accent); font-size: .76rem; font-weight: 760; letter-spacing: .13em; text-transform: uppercase; }}
+    h1 {{ margin: 0; font-size: clamp(2.45rem, 4.2vw, 4rem); line-height: .98; letter-spacing: -.05em; }}
+    .intro {{ margin: 12px 0 28px; color: var(--muted); line-height: 1.55; }}
+    .news-section {{ margin-top: 48px; }}
+    .news-section h2 {{ margin: 0 0 8px; font-size: clamp(1.5rem, 3vw, 2.4rem); letter-spacing: -.04em; }}
+    .source-status {{ margin: 0 0 12px; color: var(--muted); font-size: .8rem; }}
+    .feed-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 56px; margin: 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }}
+    .feed-row {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; margin: 0 -10px; padding: 16px 10px; border-bottom: 1px solid var(--line); border-radius: 8px; }}
+    .feed-row:hover {{ background: var(--surface); }}
+    .rank {{ color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; font-weight: 760; }}
+    .post-meta, .post-footer {{ color: var(--muted); font-size: .8rem; }}
+    h3 {{ margin: 7px 0 8px; font-size: clamp(1.18rem, 1.7vw, 1.52rem); line-height: 1.18; letter-spacing: -.028em; }}
+    h3 a {{ text-decoration-thickness: 1px; text-decoration-color: transparent; text-underline-offset: .14em; }}
+    h3 a:hover {{ color: var(--accent); text-decoration-color: currentColor; }}
+    .post-footer a {{ color: var(--accent); font-weight: 720; text-underline-offset: 4px; }}
+    @media (max-width: 720px) {{ .shell {{ width: min(100% - 28px, 1180px); }} .feed-grid {{ display: block; }} .feed-row {{ grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 14px 0; }} }}
+    @media (prefers-reduced-motion: reduce) {{ *, *::before, *::after {{ scroll-behavior: auto !important; transition-duration: .01ms !important; }} }}
+  </style>
+</head>
+<body>
+  <header class="shell"><a class="brand" href="../index.html">← Back to My Feeds</a></header>
+  <main class="shell">
+    <p class="eyebrow">Daily top 10</p>
+    <h1>Danish News</h1>
+    <p class="intro">Latest headlines from DR Nyheder and TV 2.</p>
+    <section class="news-section" aria-labelledby="dr-heading">
+      <h2 id="dr-heading">DR Nyheder</h2>
+      {dr_status}
+      <ol class="feed-grid" aria-label="Latest Danish news from DR Nyheder">
+{dr_cards}
+      </ol>
+    </section>
+    <section class="news-section" aria-labelledby="tv2-heading">
+      <h2 id="tv2-heading">TV 2</h2>
+      {tv2_status}
+      <ol class="feed-grid" aria-label="Latest Danish news from TV 2">
+{tv2_cards}
+      </ol>
+    </section>
+  </main>
+  <script>
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+  </script>
+</body>
+</html>
+"""
+
+
 def self_test() -> None:
     valid = {
         "title": "A useful <project>",
@@ -580,14 +777,21 @@ def self_test() -> None:
     assert parser.repos == [{"name": "octo/example", "url": "https://github.com/octo/example", "stars_today": "1,234", "description": "Useful project."}]
     show_hn = select_show_hn([{"id": 1, "type": "story", "title": "A Show HN project"}])
     v2ex = select_v2ex_topics([{"title": "A V2EX topic", "url": "https://www.v2ex.com/t/1", "node": {"title": "Tech"}}])
+    danish_news = [{"title": "En dansk nyhed", "url": "https://www.dr.dk/nyheder/test", "published": "2026-09-19T08:00:00+00:00"}]
+    tv2_page = '<script type="application/ld+json">{"@type":"ItemList","itemListElement":[{"name":"En TV 2 nyhed","url":"https://nyheder.tv2.dk/indland/test"}]}</script>'
+    tv2_news = [{**select_tv2_story_links(tv2_page)[0], "published": "2026-09-19T08:00:00+00:00", "source": "TV 2"}]
+    assert extract_tv2_published('<meta property="article:published_time" content="2026-09-19T08:00:00Z">') == "2026-09-19T08:00:00+00:00"
+    assert extract_tv2_published('<meta name="article:published_time" content="2026-09-19T08:00:00Z">') == "2026-09-19T08:00:00+00:00"
     checked_at = datetime(2026, 9, 19, tzinfo=timezone.utc)
     source_statuses = {
         key: {"updated_at": checked_at, "stale": key == "v2ex"}
-        for key in ("reddit", "github", "github_zh", "show_hn", "v2ex")
+        for key in ("reddit", "github", "github_zh", "show_hn", "v2ex", "danish_news", "tv2_news")
     }
     page = render_page([valid], parser.repos, parser.repos, show_hn, v2ex, source_statuses, checked_at)
+    danish_page = render_danish_news_page(danish_news, tv2_news, source_statuses["danish_news"], source_statuses["tv2_news"])
     assert "A useful &lt;project&gt;" in page and "<project>" not in page
-    assert "last known good snapshot" in page and 'href="#show-hn"' in page and 'id="stale-warning"' in page
+    assert "last known good snapshot" in page and 'href="./danish-news/index.html"' in page and "En dansk nyhed" not in page
+    assert "En dansk nyhed" in danish_page and "En TV 2 nyhed" in danish_page and "Read on DR" in danish_page and "Read on TV 2" in danish_page and 'href="../index.html"' in danish_page and "localStorage.getItem" in danish_page
     with tempfile.TemporaryDirectory() as directory:
         cache_dir = Path(directory)
         fresh = load_source("sample", lambda: [valid], cache_dir)
@@ -616,15 +820,24 @@ def main() -> int:
             "github_zh": load_source("github_zh", lambda: fetch_trending_repos(GITHUB_TRENDING_ZH_URL, "GitHub Trending 中文")),
             "show_hn": load_source("show_hn", fetch_show_hn),
             "v2ex": load_source("v2ex", fetch_v2ex_topics),
+            "danish_news": load_source("danish_news", fetch_danish_news),
+            "tv2_news": load_source("tv2_news", fetch_tv2_news),
         }
         posts = sources["reddit"]["items"]
         repos = sources["github"]["items"]
         chinese_repos = sources["github_zh"]["items"]
         show_hn = sources["show_hn"]["items"]
         v2ex_topics = sources["v2ex"]["items"]
+        danish_news = sources["danish_news"]["items"]
+        tv2_news = sources["tv2_news"]["items"]
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         (OUTPUT_DIR / "index.html").write_text(
             render_page(posts, repos, chinese_repos, show_hn, v2ex_topics, sources, datetime.now(timezone.utc)), encoding="utf-8"
+        )
+        danish_output_dir = OUTPUT_DIR / "danish-news"
+        danish_output_dir.mkdir(exist_ok=True)
+        (danish_output_dir / "index.html").write_text(
+            render_danish_news_page(danish_news, tv2_news, sources["danish_news"], sources["tv2_news"]), encoding="utf-8"
         )
         (OUTPUT_DIR / ".nojekyll").touch()
     except (OSError, RuntimeError, ValueError) as error:
@@ -633,7 +846,7 @@ def main() -> int:
 
     print(
         f"Built {OUTPUT_DIR / 'index.html'} with {len(posts)} Reddit posts, {len(repos)} global repositories, "
-        f"{len(chinese_repos)} Chinese-language repositories, {len(show_hn)} Show HN stories, and {len(v2ex_topics)} V2EX topics"
+        f"{len(chinese_repos)} Chinese-language repositories, {len(show_hn)} Show HN stories, {len(v2ex_topics)} V2EX topics, {len(danish_news)} DR stories, and {len(tv2_news)} TV 2 stories"
     )
     return 0
 

@@ -4,7 +4,8 @@ A static daily snapshot of the weekly top 10 posts from
 [`r/SideProject`](https://www.reddit.com/r/SideProject/) and the daily top 10
 repositories from [GitHub Trending](https://github.com/trending?since=daily)
 and [GitHub Trending 中文](https://github.com/trending?since=daily&spoken_language_code=zh),
-plus Show HN and V2EX Hot Topics.
+plus Show HN and V2EX Hot Topics. Danish News is a separate page with the
+latest 10 headlines from DR Nyheder and TV 2.
 
 ## Setup
 
@@ -13,8 +14,9 @@ plus Show HN and V2EX Hot Topics.
 
 No accounts, API applications, or repository secrets are required. The
 generator reads Reddit's public weekly top Atom feed, GitHub's public daily
-Trending pages, Hacker News's public Show HN API, and V2EX's public Hot Topics
-API.
+Trending pages, Hacker News's public Show HN API, V2EX's public Hot Topics
+API, DR Nyheder's public RSS feed, and TV 2's public news page and article
+metadata.
 
 Each source is cached independently after a successful read. A first run still
 fails if any source cannot be fetched; later runs can publish a validated,
